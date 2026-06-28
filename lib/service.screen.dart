@@ -1,5 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
+class ApiService {
+  // PENTING: Jika pakai Android Emulator, gunakan 10.0.2.2. 
+  // Jika pakai HP asli, gunakan IP Address WiFi laptop Anda (misal: 192.168.1.5)
+  static const String baseUrl = 'http://10.0.2.2:8000/api'; 
+
+  Future<void> registerUser(String name, String email, String password) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/register'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode({
+        'name': name,
+        'email': email,
+        'password': password,
+      }),
+    );
+
+    if (response.statusCode == 201) {
+      print('Berhasil Daftar: ${response.body}');
+      // Arahkan user ke halaman login atau beranda
+    } else {
+      print('Gagal Daftar: ${response.body}');
+      // Tampilkan notifikasi error ke user
+    }
+  }
+}
 
 class CustomerServiceScreen extends StatelessWidget {
   const CustomerServiceScreen({super.key});
