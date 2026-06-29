@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'home.screen.dart'; 
+import 'package:http/http.dart' as http; // Wajib untuk API
+import 'dart:convert'; // Wajib untuk JSON
+
 
 void main() {
   runApp(const MyApp());
@@ -7,6 +10,26 @@ void main() {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
+// Fungsi untuk nembak API Produk
+  Future<List<dynamic>> fetchProducts() async {
+    // PENTING: Ganti dengan IP Address Laptop lu (192.168.x.x)
+    const String apiUrl = 'http://192.168.1.34:8000/api/mobile/products'; 
+
+    try {
+      final response = await http.get(Uri.parse(apiUrl));
+
+      if (response.statusCode == 200) {
+        final resBody = jsonDecode(response.body);
+        if (resBody['status'] == 'success') {
+          return resBody['data']; // Mengembalikan List of Products dari Laravel
+        }
+      }
+      throw Exception('Gagal memuat produk dari server');
+    } catch (e) {
+      throw Exception('Error Koneksi: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,59 +67,67 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   bool isLoginScreen = true; 
 
-  // Controller untuk mengambil teks yang diketik oleh user
+  // Controller untuk input email & password
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
-  // SIMULASI DATABASE LOKAL (Daftar akun yang terdaftar di aplikasi)
-  final Map<String, String> _registeredUsers = {
-    'abel@gmail.com': '123',
-    'admin@gmail.com': 'admin', // Akun khusus untuk Admin
-  };
-
-  // Fungsi Logika Validasi Login
-  void _handleLogin() {
+  // --- FUNGSI LOGIN KE DATABASE LARAVEL ---
+  Future<void> _handleLogin() async {
     String email = _emailController.text.trim();
     String password = _passwordController.text.trim();
 
-    // 1. Cek apakah inputan kosong
     if (email.isEmpty || password.isEmpty) {
       _showSnackBar('Email dan Password tidak boleh kosong!');
       return;
     }
 
-    // 2. Cek apakah email terdaftar di database kita
-    if (_registeredUsers.containsKey(email)) {
-      // 3. Cek apakah passwordnya cocok
-      if (_registeredUsers[email] == password) {
+    // PENTING: Ganti 192.168.1.15 sesuai IP Laptop lu (CMD: ipconfig)
+    const String apiUrl = 'http://192.168.1.34:8000/api/mobile/login';
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
+      );
+
+      final resBody = jsonDecode(response.body);
+
+      // Cek context biar ga error setelah proses async
+      if (!mounted) return; 
+
+      if (response.statusCode == 200 && resBody['status'] == 'success') {
+        String loggedInUserName = resBody['data']['name'];
+        String userRole = resBody['data']['role'] ?? 'customer'; 
         
-        // JIKA YANG LOGIN ADALAH ADMIN
-        if (email == 'admin@gmail.com') {
-          _showSnackBar('Login Sukses! Selamat Datang Admin.');
+        // Cek Role: Apakah Admin atau Customer?
+        if (userRole == 'admin') {
+          _showSnackBar('Login Sukses! Selamat Datang Admin $loggedInUserName.');
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => const AdminDashboardScreen()),
           );
-        } 
-        // JIKA YANG LOGIN ADALAH CUSTOMER BIASA (Abel atau akun baru)
-        else {
-          _showSnackBar('Login Sukses! Selamat Berbelanja.');
+        } else {
+          _showSnackBar('Login Sukses! Selamat Berbelanja $loggedInUserName.');
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => const MainLayout()),
+            MaterialPageRoute(builder: (context) => const MainLayout()), 
           );
         }
-
       } else {
-        _showSnackBar('Password salah! Silakan coba lagi.');
+        _showSnackBar(resBody['message'] ?? 'Gagal login. Periksa email & password.');
       }
-    } else {
-      _showSnackBar('Email tidak terdaftar! Silakan buat akun dulu.');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Error Koneksi Database: $e');
     }
   }
 
-  // Fungsi Logika Pendaftaran Akun Baru
-  void _handleRegister() {
+  // --- FUNGSI DAFTAR / BUAT AKUN KE DATABASE LARAVEL ---
+  Future<void> _handleRegister() async {
     String email = _emailController.text.trim();
     String password = _passwordController.text.trim();
 
@@ -105,20 +136,43 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-    if (_registeredUsers.containsKey(email)) {
-      _showSnackBar('Email ini sudah terdaftar sebagai pengguna!');
-    } else {
-      // Masukkan data baru ke dalam database lokal kita
-      setState(() {
-        _registeredUsers[email] = password;
-        isLoginScreen = true; // Balikkan ke halaman login setelah sukses daftar
-      });
-      _showSnackBar('Akun berhasil dibuat! Silakan masuk.');
-      _passwordController.clear(); // Bersihkan form password
+    // Ambil teks sebelum @ di email sebagai nama
+    String name = email.split('@')[0];
+
+    // PENTING: Ganti 192.168.1.15 sesuai IP Laptop lu (CMD: ipconfig)
+    const String apiUrl = 'http://192.168.1.34:8000/api/mobile/register';
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({
+          'name': name,
+          'email': email,
+          'password': password,
+        }),
+      );
+
+      final resBody = jsonDecode(response.body);
+
+      if (!mounted) return;
+
+      if (response.statusCode == 201 || (response.statusCode == 200 && resBody['status'] == 'success')) {
+        setState(() {
+          isLoginScreen = true; // Balik ke form login
+        });
+        _showSnackBar('Akun berhasil dibuat! Silakan masuk.');
+        _passwordController.clear(); 
+      } else {
+        _showSnackBar(resBody['message'] ?? 'Gagal membuat akun! Email mungkin sudah dipakai.');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar('Error Koneksi Database: $e');
     }
   }
 
-  // Fungsi pembantu untuk menampilkan pesan peringatan di bawah layar
+  // Fungsi memunculkan notifikasi bawah
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
@@ -157,19 +211,17 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // INPUT EMAIL (Menggunakan Controller)
                 TextField(
                   controller: _emailController,
                   style: const TextStyle(color: Colors.white),
                   keyboardType: TextInputType.emailAddress,
-                  decoration: InputDecoration(
+                  decoration: const InputDecoration(
                     hintText: 'Masukkan Email Anda (contoh: abel@gmail.com)',
-                    prefixIcon: const Icon(Icons.email_outlined),
+                    prefixIcon: Icon(Icons.email_outlined),
                   ),
                 ),
                 const SizedBox(height: 15),
 
-                // INPUT PASSWORD (Menggunakan Controller)
                 TextField(
                   controller: _passwordController,
                   obscureText: true, 
@@ -181,7 +233,6 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
                 const SizedBox(height: 25),
 
-                // TOMBOL VALIDASI
                 SizedBox(
                   width: double.infinity,
                   height: 50,
@@ -232,7 +283,7 @@ class _AuthScreenState extends State<AuthScreen> {
 }
 
 // -------------------------------------------------------------
-// HALAMAN DASHBOARD KHUSUS ADMIN (Untuk Upload Produk & Diskon)
+// HALAMAN DASHBOARD KHUSUS ADMIN
 // -------------------------------------------------------------
 class AdminDashboardScreen extends StatelessWidget {
   const AdminDashboardScreen({super.key});
@@ -247,7 +298,6 @@ class AdminDashboardScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white),
             onPressed: () {
-              // Log out kembali ke halaman login
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (context) => const AuthScreen()),
@@ -261,14 +311,9 @@ class AdminDashboardScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Selamat Datang Owner / Admin!',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
+            const Text('Selamat Datang Owner / Admin!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const Text('Di sini Anda bisa mengelola konten aplikasi mobile Kiwkiw.', style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 30),
-            
-            // Menu Aksi Admin berbentuk Card
             Expanded(
               child: GridView.count(
                 crossAxisCount: 2,
@@ -294,9 +339,7 @@ class AdminDashboardScreen extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       color: bgColor,
       child: InkWell(
-        onTap: () {
-          // Aksi ketika menu diklik (Nanti bisa dihubungkan ke form input)
-        },
+        onTap: () {},
         borderRadius: BorderRadius.circular(15),
         child: Padding(
           padding: const EdgeInsets.all(15.0),

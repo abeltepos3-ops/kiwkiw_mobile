@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+
 import 'package:kiwkiw_mobile_app/search.screen.dart';
-// MENYAMBUNGKAN KE FILE DETAIL SCREEN YANG BARU
 import 'detail.screen.dart';
-// HALAMAN KERANJANG & WISHLIST YANG SUDAH NYATA (BUKAN PLACEHOLDER LAGI)
 import 'cart.screen.dart';
 import 'wishlist.screen.dart';
-// HALAMAN PROFIL CUSTOMER YANG SUDAH NYATA (BUKAN PLACEHOLDER LAGI)
 import 'profile.screen.dart';
-// STORE UNTUK BADGE JUMLAH ITEM DI BOTTOM NAV
 import 'app.store.dart';
 
-// Wrapper untuk mengatur Bottom Navigation Bar
+// ==========================================
+// KELAS MAIN LAYOUT
+// ==========================================
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
 
@@ -50,7 +51,6 @@ class _MainLayoutState extends State<MainLayout> {
           const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           const BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
           BottomNavigationBarItem(
-            // Angka di badge sekarang otomatis ikut jumlah barang di Keranjang
             icon: ValueListenableBuilder<List<Map<String, dynamic>>>(
               valueListenable: AppStore.instance.cartItems,
               builder: (context, items, _) {
@@ -66,7 +66,6 @@ class _MainLayoutState extends State<MainLayout> {
             label: 'Cart',
           ),
           BottomNavigationBarItem(
-            // Angka di badge sekarang otomatis ikut jumlah barang di Wishlist
             icon: ValueListenableBuilder<List<Map<String, dynamic>>>(
               valueListenable: AppStore.instance.wishlistItems,
               builder: (context, items, _) {
@@ -81,47 +80,132 @@ class _MainLayoutState extends State<MainLayout> {
             ),
             label: 'Favorite',
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Profile'),
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline), label: 'Profile'),
         ],
       ),
     );
   }
 }
 
-class HomeScreen extends StatelessWidget {
+// ==========================================
+// KELAS HOME SCREEN
+// ==========================================
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  // ⚠️ PENTING: Ganti dengan IP Address laptop lu!
+  final String ipAddress = '192.168.1.34';
+
+  late Future<List<dynamic>> futureProducts;
+
+  @override
+  void initState() {
+    super.initState();
+    futureProducts = fetchProducts();
+  }
+
+  // --- FUNGSI AMBIL DATA DARI API ---
+  Future<List<dynamic>> fetchProducts() async {
+    final String apiUrl = 'http://$ipAddress:8000/api/mobile/products';
+
+    try {
+      final response = await http.get(Uri.parse(apiUrl));
+
+      // DEBUG: uncomment baris ini kalau mau lihat response API-nya
+      // print('=== RESPONSE API ===');
+      // print(response.body.substring(0, 500)); // Print 500 karakter pertama
+
+      if (response.statusCode == 200) {
+        final decodedData = jsonDecode(response.body);
+
+        if (decodedData is Map<String, dynamic>) {
+          if (decodedData.containsKey('data')) {
+            return decodedData['data'];
+          } else if (decodedData.containsKey('products')) {
+            return decodedData['products'];
+          } else {
+            throw Exception('Data dibungkus tapi labelnya ga ketemu');
+          }
+        } else if (decodedData is List) {
+          return decodedData;
+        } else {
+          throw Exception('Format JSON tidak dikenali');
+        }
+      } else {
+        throw Exception('Gagal memuat data. Status: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Error koneksi: $e');
+    }
+  }
+
+  // --- FUNGSI BANTU: Build URL gambar dari path Laravel ---
+  // Handle 2 kemungkinan format dari API:
+  // 1. Path relatif  → "products/foto.jpg"
+  // 2. URL lengkap   → "http://192.168.1.34:8000/storage/products/foto.jpg"
+  String _buildImageUrl(dynamic imagePath) {
+    if (imagePath == null || imagePath.toString().isEmpty) return '';
+
+    final String path = imagePath.toString();
+
+    // Kalau sudah full URL, langsung pakai
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+
+    // Kalau path relatif, gabungkan dengan base URL storage Laravel
+    // Hapus slash di depan kalau ada, biar ga double slash
+    final String cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    return 'http://$ipAddress:8000/storage/$cleanPath';
+  }
+
+  // --- FUNGSI BANTU: Build widget gambar ---
+  Widget _buildImageWidget(String imageUrl) {
+    if (imageUrl.isEmpty) {
+      return const Center(
+        child: Icon(Icons.image_not_supported, color: Colors.grey, size: 40),
+      );
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      // Tampilkan loading spinner saat gambar sedang dimuat
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Center(
+          child: CircularProgressIndicator(
+            color: Colors.grey.shade400,
+            strokeWidth: 2,
+            value: loadingProgress.expectedTotalBytes != null
+                ? loadingProgress.cumulativeBytesLoaded /
+                    loadingProgress.expectedTotalBytes!
+                : null,
+          ),
+        );
+      },
+      // Tampilkan icon error kalau gambar gagal dimuat
+      errorBuilder: (context, error, stackTrace) {
+        // DEBUG: uncomment baris ini kalau gambar masih error
+        // print('=== IMAGE ERROR ===');
+        // print('URL: $imageUrl');
+        // print('Error: $error');
+        return const Center(
+          child: Icon(Icons.broken_image, color: Colors.grey, size: 40),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final List<String> brands = ['OBEY', 'BEN DAVIS', 'LMC.', 'SANTA CRUZ'];
-
-    // DATA PRODUK YANG AKAN DIKIRIM KE DETAIL SCREEN SAAT DIKLIK
-    final List<Map<String, dynamic>> products = [
-      {
-        'name': 'Hodie Obey', 
-        'price': 'Rp. 350.000', 
-        'rating': '5.0',
-        'image': 'https://picsum.photos/id/225/500' // Gambar Hoodie Merah/Hitam Obey
-      },
-      {
-        'name': 'Hodie Ben DAVIS', 
-        'price': 'Rp. 300.000', 
-        'rating': '5.0',
-        'image': 'https://picsum.photos/id/338/500'
-      },
-      {
-        'name': 'Hodie LMC Mozaic', 
-        'price': 'Rp. 500.000', 
-        'rating': '5.0',
-        'image': 'https://picsum.photos/id/312/500'
-      },
-      {
-        'name': 'Hodie Santa Cruz', 
-        'price': 'Rp. 550.000', 
-        'rating': '5.0',
-        'image': 'https://picsum.photos/id/443/500'
-      },
-    ];
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -129,7 +213,7 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // HEADER SAPAAN USER
+            // --- HEADER SAPAAN USER ---
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -138,7 +222,8 @@ class HomeScreen extends StatelessWidget {
                   children: const [
                     Text(
                       'Hi, Abel !',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          fontSize: 22, fontWeight: FontWeight.bold),
                     ),
                     Text(
                       'Welcome back',
@@ -155,7 +240,7 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
 
-            // BANNER PROMO
+            // --- BANNER PROMO ---
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(15),
@@ -171,7 +256,8 @@ class HomeScreen extends StatelessWidget {
                       children: [
                         const Text(
                           'Promo Hodie Obey 15%',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                         const SizedBox(height: 15),
                         ElevatedButton(
@@ -183,7 +269,9 @@ class HomeScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          child: const Text('Beli Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text('Beli Sekarang',
+                              style:
+                                  TextStyle(fontWeight: FontWeight.bold)),
                         )
                       ],
                     ),
@@ -194,7 +282,8 @@ class HomeScreen extends StatelessWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(10),
                       image: const DecorationImage(
-                        image: NetworkImage('https://picsum.photos/id/225/150'),
+                        image: NetworkImage(
+                            'https://picsum.photos/id/225/150'),
                         fit: BoxFit.cover,
                       ),
                     ),
@@ -204,10 +293,11 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 25),
 
-            // STRUKTUR BRAND LIST
+            // --- STRUKTUR BRAND LIST ---
             const Text(
               'Brands',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              style:
+                  TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -220,13 +310,16 @@ class HomeScreen extends StatelessWidget {
                     width: 60,
                     margin: const EdgeInsets.only(right: 15),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.redAccent.shade100),
+                      border: Border.all(
+                          color: Colors.redAccent.shade100),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Center(
                       child: Text(
                         brands[index],
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10),
                       ),
                     ),
                   );
@@ -235,80 +328,145 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 25),
 
-            // GRID PRODUK YANG SUDAH TERINTEGRASI DENGAN DETAIL_SCREEN.DART
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: products.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 0.75,
-                crossAxisSpacing: 15,
-                mainAxisSpacing: 15,
-              ),
-              itemBuilder: (context, index) {
-                final product = products[index];
+            // --- GRID PRODUK DARI DATABASE ---
+            FutureBuilder<List<dynamic>>(
+              future: futureProducts,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState ==
+                    ConnectionState.waiting) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20.0),
+                      child: CircularProgressIndicator(
+                          color: Colors.black),
+                    ),
+                  );
+                }
 
-                return GestureDetector(
-                  // AKSI KLIK: Otomatis pindah halaman dan mengirim data spesifik produk
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => DetailScreen(
-                          productName: product['name'],
-                          productPrice: product['price'],
-                          imageUrl: product['image'],
-                        ),
-                      ),
-                    );
-                  },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(15),
-                            image: DecorationImage(
-                              image: NetworkImage(product['image']),
-                              fit: BoxFit.cover,
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Text('Error: ${snapshot.error}',
+                        style:
+                            const TextStyle(color: Colors.red)),
+                  );
+                }
+
+                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(
+                      child:
+                          Text('Belum ada produk di database.'));
+                }
+
+                final products = snapshot.data!;
+
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: products.length,
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.75,
+                    crossAxisSpacing: 15,
+                    mainAxisSpacing: 15,
+                  ),
+                  itemBuilder: (context, index) {
+                    final product = products[index];
+
+                    // 1. Ambil data teks
+                    String namaProduk =
+                        product['name'] ?? 'Tanpa Nama';
+                    String hargaProduk = product['price'] != null
+                        ? 'Rp. ${product['price']}'
+                        : 'Rp. 0';
+                    String ratingProduk =
+                        product['rating']?.toString() ?? '5.0';
+
+                    // 2. LOGIKA GAMBAR - pakai path dari Laravel storage
+                    // Coba field 'image', 'image_url', atau 'photo' — sesuaikan
+                    // dengan nama field yang ada di response API lu
+                    final rawImagePath = product['image'] ??
+                        product['image_url'] ??
+                        product['photo'] ??
+                        '';
+                    final String imageUrl =
+                        _buildImageUrl(rawImagePath);
+
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DetailScreen(
+                              productName: namaProduk,
+                              productPrice: hargaProduk,
+                              imageUrl: imageUrl, // Kirim URL ke DetailScreen
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        product['name'],
-                        style: const TextStyle(fontWeight: FontWeight.w500),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        );
+                      },
+                      child: Column(
+                        crossAxisAlignment:
+                            CrossAxisAlignment.start,
                         children: [
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius:
+                                    BorderRadius.circular(15),
+                              ),
+                              child: ClipRRect(
+                                borderRadius:
+                                    BorderRadius.circular(15),
+                                child: SizedBox.expand(
+                                  child: _buildImageWidget(imageUrl),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                           Text(
-                            product['price'],
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                            namaProduk,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w500),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
                             children: [
-                              const Icon(Icons.star, color: Colors.amber, size: 12),
-                              const SizedBox(width: 2),
                               Text(
-                                product['rating'],
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                hargaProduk,
+                                style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey),
                               ),
+                              Row(
+                                children: [
+                                  const Icon(Icons.star,
+                                      color: Colors.amber,
+                                      size: 12),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    ratingProduk,
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight:
+                                            FontWeight.bold),
+                                  ),
+                                ],
+                              )
                             ],
                           )
                         ],
-                      )
-                    ],
-                  ),
-                );
+                      ),
+                    );
+                  },
+                ); // ← closing GridView.builder
               },
-            ),
+            ), // ← closing FutureBuilder
           ],
         ),
       ),
